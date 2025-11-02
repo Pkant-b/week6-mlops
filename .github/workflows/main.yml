@@ -133,3 +133,5 @@ jobs:
         run: |
           echo "Service Status (External IP):"
           kubectl get service ${{ env.DEPLOYMENT_NAME }}-service
+          kubectl get nodes -o wide
+          kubectl port-forward svc/fastapi-backend-service 8000:8000
