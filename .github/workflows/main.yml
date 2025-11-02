@@ -108,7 +108,7 @@ jobs:
           cluster_name: ${{ env.GKE_CLUSTER }}
           location: ${{ env.GKE_ZONE }}
 
-      - name: Wait for 2 Minutes (Pre-Deployment Pause)
+      - name: Wait for 1 Minutes (Pre-Deployment Pause)
         run: |
           echo "Waiting 120 seconds for GKE API server stability..."
           sleep 60
@@ -145,4 +145,3 @@ jobs:
           echo "Service Status (External IP):"
           kubectl get service ${{ env.DEPLOYMENT_NAME }}-service
           kubectl get nodes -o wide
-          kubectl port-forward deployment/fastapi-backend 8000:8000
