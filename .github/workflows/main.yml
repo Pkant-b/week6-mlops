@@ -1,30 +1,71 @@
-name: MLOps Model CI + MLflow
+name: Docker Build, Push, and GKE Deploy Pipeline
 
 on:
   push:
     branches:
       - dev
       - main
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
+
 permissions:
   contents: write
-  pull-requests: write
+  id-token: write # Crucial for GCP authentication
 
 env:
+  # --- GCP & Artifact Registry Configuration ---
   PROJECT_ID: keen-phalanx-473718-p1
   AR_REGION: us-central1
   AR_REPOSITORY: mlops-mlflow
   IMAGE_NAME: fastapi-backend
+  # --- GKE Deployment Configuration ---
+  GKE_CLUSTER: fastapi-ci-cluster
+  GKE_ZONE: us-central1-a
+  DEPLOYMENT_NAME: fastapi-min-deployment
+  MANIFEST_PATH: k8s/deployment.yaml # Path to your existing deployment file
   
 jobs:
-  test-and-validate:
+  # ==========================================================
+  # JOB 1: INFRASTRUCTURE CREATION (Cluster Provisioning)
+  # ==========================================================
+  infrastructure-setup:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: Google Cloud Authentication
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
+      - name: Create GKE Cluster (If not found)
+        # Creates the GKE cluster instance using gcloud CLI
+        run: |
+          echo "Checking for cluster ${{ env.GKE_CLUSTER }}..."
+          if ! gcloud container clusters describe ${{ env.GKE_CLUSTER }} --zone ${{ env.GKE_ZONE }} --project ${{ env.PROJECT_ID }} --quiet; then
+            echo "Cluster not found. Creating a new GKE cluster..."
+            
+            gcloud container clusters create ${{ env.GKE_CLUSTER }} \
+              --zone ${{ env.GKE_ZONE }} \
+              --num-nodes=1 \
+              --machine-type=e2-small \
+              --release-channel=regular \
+              --workload-identity-config=enabled \
+              --enable-autoscaling --min-nodes=1 --max-nodes=2 \
+              --project=${{ env.PROJECT_ID }}
+          else
+            echo "Cluster ${{ env.GKE_CLUSTER }} already exists. Skipping creation."
+          fi
+
+  # ==========================================================
+  # JOB 2: BUILD, PUSH, AND DEPLOYMENT
+  # ==========================================================
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    needs: infrastructure-setup # Ensure cluster is ready before deployment
+    
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -36,51 +77,61 @@ jobs:
 
       - name: Pip install
         run: pip install dvc dvc-gs dvc[gcs]
-        
+      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         
+      # --- AUTHENTICATION & AR PUSH ---
       - name: Google Cloud Authentication
-        id: 'auth'
-        uses: 'google-github-actions/auth@v3'
+        uses: 'google-github-actions/auth@v2'
         with:
-          credentials_json: '${{ secrets.GCP_SA }}'
-    
-      - name: Pulling Data using DVC
-        # Assuming you have installed DVC/dvc-gs in a prior setup step or Dockerfile
-        run: |
-          dvc pull
+          credentials_json: ${{ secrets.GCP_SA }}
 
       - name: Configure Docker for Artifact Registry
-        # This command uses the gcloud credentials to authorize Docker access.
+        # Authenticates the Docker CLI to push to GCP AR
         run: gcloud auth configure-docker ${{ env.AR_REGION }}-docker.pkg.dev
         
       - name: Build and Push Docker Image to Artifact Registry
-        id: docker-build-push
         run: |
-          # 1. Define the full registry path/tag using proper shell syntax (separate lines).
           FULL_IMAGE_TAG="${{ env.AR_REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
           LATEST_TAG="${{ env.AR_REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest"
           
-          echo "Building image: ${FULL_IMAGE_TAG}"
-          
-          # 2. Build the image, applying two tags (latest and SHA)
+          echo "Building image and tagging as :latest and :${{ github.sha }}"
           docker build -t "${FULL_IMAGE_TAG}" -t "${LATEST_TAG}" .
-          
-          # 3. Push both tags to Artifact Registry
-          echo "Pushing images..."
           docker push "${FULL_IMAGE_TAG}"
           docker push "${LATEST_TAG}"
           
-          # 4. Output the full tag for use in later deployment steps
-          echo "image-tag=${FULL_IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+      # --- GKE DEPLOYMENT ---
+      - name: Get GKE Credentials (Configure kubectl)
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER }}
+          location: ${{ env.GKE_ZONE }}
+
+      - name: Wait for 2 Minutes (Pre-Deployment Pause)
+        run: |
+          echo "Waiting 120 seconds for GKE API server stability..."
+          sleep 120
+
+      - name: Apply Kubernetes Manifest (Direct Apply)
+        # Assumes the existing manifest file (k8s/deployment.yaml) is configured to use the :latest tag
+        run: |
+          MANIFEST_PATH=${{ env.MANIFEST_PATH }}
           
-        env:
-          # REPO_TOKEN is needed for CML actions, but placed here for structure compliance
-          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
-      # --- Placeholder for ML Execution, Testing, and Reporting ---
-      # Add your 'Training Model', 'Run Tests', and 'Create cml report' steps here.
-      # Example:
-      # - name: Run Tests
-      #   run: pytest -v &> output.txt
+          echo "Applying deployment from ${MANIFEST_PATH}..."
+          kubectl apply -f ${MANIFEST_PATH}
+
+      # -----------------------------------------------------
+      # STATUS AND ROLLOUT CHECK
+      # -----------------------------------------------------
+      - name: Verify Deployment Rollout Status
+        run: |
+          echo "Waiting for deployment ${{ env.DEPLOYMENT_NAME }} to complete rollout..."
+          # This command blocks until Pods are ready (checking the image tag update)
+          kubectl rollout status deployment/${{ env.DEPLOYMENT_NAME }} --timeout=5m
+          echo "Deployment successful!"
+
+      - name: Show Service Status
+        run: |
+          echo "Service Status (External IP):"
+          kubectl get service ${{ env.DEPLOYMENT_NAME }}-service
