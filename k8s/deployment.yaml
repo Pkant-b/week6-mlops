@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: fastapi-backend
-        image: us-central1-docker.pkg.dev/our-vigil-473719-c2/mlops-assets/fastapi-backend:latest
+        image: us-central1-docker.pkg.dev/our-vigil-473719-c2/mlflow-assets/fastapi-backend:latest
         ports:
         - containerPort: 8000
 ---
