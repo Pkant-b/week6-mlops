@@ -14,9 +14,9 @@ permissions:
 
 env:
   # --- GCP & Artifact Registry Configuration ---
-  PROJECT_ID: keen-phalanx-473718-p1
+  PROJECT_ID: our-vigil-473719-c2
   AR_REGION: us-central1
-  AR_REPOSITORY: mlops-mlflow
+  AR_REPOSITORY: mlops-assets
   IMAGE_NAME: fastapi-backend
   # --- GKE Deployment Configuration ---
   GKE_CLUSTER: fastapi-ci-cluster
@@ -85,8 +85,7 @@ jobs:
         uses: 'google-github-actions/auth@v2'
         with:
           credentials_json: ${{ secrets.GCP_SA }}
-      - name: DVC PULL
-        run: dvc pull
+ 
 
       - name: Configure Docker for Artifact Registry
         # Authenticates the Docker CLI to push to GCP AR
