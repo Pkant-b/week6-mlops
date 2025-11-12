@@ -16,7 +16,7 @@ env:
   # --- GCP & Artifact Registry Configuration ---
   PROJECT_ID: our-vigil-473719-c2
   AR_REGION: us-central1
-  AR_REPOSITORY: mlops-assets
+  AR_REPOSITORY: mlflow-assets
   IMAGE_NAME: fastapi-backend
   # --- GKE Deployment Configuration ---
   GKE_CLUSTER: fastapi-ci-cluster
