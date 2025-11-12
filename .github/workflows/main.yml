@@ -20,7 +20,7 @@ env:
   IMAGE_NAME: fastapi-backend
   # --- GKE Deployment Configuration ---
   GKE_CLUSTER: fastapi-ci-cluster
-  GKE_ZONE: us-east1
+  GKE_ZONE: europe-north1
   DEPLOYMENT_NAME: fastapi-backend
   MANIFEST_PATH: k8s/deployment.yaml # Path to your existing deployment file
   
